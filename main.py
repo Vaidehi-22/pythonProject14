@@ -200,7 +200,6 @@ if planon_file and sys_file:
 
                 # --- Build Final Nomenclature (fixed format) ---
                 loc_trimmed = str(location_code).replace("LOC-", "", 1) if location_code else ""
-                bldg_trimmed = str(building).split("-", 1)[-1] if "-" in str(building) else building
 
                 # Split location into parts: AE and ABUS2
                 loc_parts = loc_trimmed.split("-")
