@@ -166,6 +166,13 @@ if planon_file and sys_file:
 
     # Generate nomenclatures
     if st.button("🚀 Generate Final Nomenclatures"):
+        if not equip_terms:
+            st.error("❌ Please select at least one equipment")
+            st.stop()
+        if any(not num for num in asset_numbers.values()):
+            st.error("❌ Please enter asset numbers for all selected equipments")
+            st.stop()
+
         all_nomenclatures = []
 
         for equip_term in equip_terms:
@@ -191,10 +198,25 @@ if planon_file and sys_file:
                 tag_name = str(row["Name"])
                 tag_abbr = str(row["Abbreviation"])
 
-                # --- Build Final Nomenclature ---
+                # --- Build Final Nomenclature (fixed format) ---
                 loc_trimmed = str(location_code).replace("LOC-", "", 1) if location_code else ""
-                bldg_trimmed = str(building).split("_", 1)[-1] if "-" in str(building) else building
-                prefix = f"{loc_trimmed}-{bldg_trimmed}" if loc_trimmed else bldg_trimmed
+                bldg_trimmed = str(building).split("-", 1)[-1] if "-" in str(building) else building
+
+                # Split location into parts: AE and ABUS2
+                loc_parts = loc_trimmed.split("-")
+                if len(loc_parts) >= 2:
+                    loc_prefix = loc_parts[0]  # AE
+                    loc_site = loc_parts[1]  # ABUS2
+                    loc_formatted = f"{loc_prefix}_{loc_site}"
+                else:
+                    loc_formatted = loc_trimmed
+
+                # Keep building code as-is
+                bldg_trimmed = str(building)
+
+                # Final prefix
+                prefix = f"{loc_formatted}_{bldg_trimmed}"
+
                 equip_token = f"{equip_abbrev}{asset_number}"
                 final = f"{prefix}_{floor}_{equip_token}_{room}_{tag_abbr}"
 
