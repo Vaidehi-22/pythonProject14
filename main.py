@@ -199,7 +199,7 @@ if planon_file and sys_file:
                 tag_abbr = str(row["Abbreviation"])
 
                 # --- Clean Room code: keep only numbers ---
-                room_clean = "".join(filter(str.isdigit, str(room))) if room else room
+                room_clean = re.sub(r"[^0-9.]", "", str(room)) if room else room
 
                 # --- Clean Tag Abbreviation: remove numbers ---
                 tag_abbr_clean = re.sub(r"\d+", "", str(tag_abbr))
