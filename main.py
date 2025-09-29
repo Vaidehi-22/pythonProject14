@@ -211,7 +211,8 @@ if planon_file and sys_file:
                     loc_formatted = loc_trimmed
 
                 # Keep building code as-is
-                bldg_trimmed = str(building)
+                bldg_parts = str(building).split("-", 1)
+                bldg_trimmed = bldg_parts[1] if len(bldg_parts) > 1 else building
 
                 # Final prefix
                 prefix = f"{loc_formatted}_{bldg_trimmed}"
