@@ -198,31 +198,33 @@ if planon_file and sys_file:
                 tag_name = str(row["Name"])
                 tag_abbr = str(row["Abbreviation"])
 
+                # --- Clean Room code: keep only numbers ---
+                room_clean = "".join(filter(str.isdigit, str(room))) if room else room
+
+                # --- Clean Tag Abbreviation: remove numbers ---
+                tag_abbr_clean = re.sub(r"\d+", "", str(tag_abbr))
+
                 # --- Build Final Nomenclature (fixed format) ---
                 loc_trimmed = str(location_code).replace("LOC-", "", 1) if location_code else ""
 
-                # Split location into parts: AE and ABUS2
                 loc_parts = loc_trimmed.split("-")
                 if len(loc_parts) >= 2:
-                    loc_prefix = loc_parts[0]  # AE
-                    loc_site = loc_parts[1]  # ABUS2
+                    loc_prefix = loc_parts[0]          # AE
+                    loc_site = loc_parts[1]            # ABUS2
                     loc_formatted = f"{loc_prefix}_{loc_site}"
                 else:
                     loc_formatted = loc_trimmed
 
-                # Keep building code as-is
                 bldg_parts = str(building).split("-", 1)
                 bldg_trimmed = bldg_parts[1] if len(bldg_parts) > 1 else building
 
-                # Final prefix
                 prefix = f"{loc_formatted}_{bldg_trimmed}"
-
                 equip_token = f"{equip_abbrev}{asset_number}"
-                final = f"{prefix}_{floor}_{equip_token}_{room}_{tag_abbr}"
+                final = f"{prefix}_{floor}_{equip_token}_{room_clean}_{tag_abbr_clean}"
 
                 all_nomenclatures.append([
-                    location_code, building, floor, room,
-                    equip_term, equip_abbrev, tag_name, tag_abbr, final
+                    location_code, building, floor, room_clean,
+                    equip_term, equip_abbrev, tag_name, tag_abbr_clean, final
                 ])
 
         if all_nomenclatures:
@@ -235,6 +237,12 @@ if planon_file and sys_file:
                 ]
             )
 
+            # Add explanatory note
+            note_text = "⚠️ Note: Room codes are trimmed to numeric parts only; sensor names ignore numeric values."
+            note_df = pd.DataFrame([[note_text] + [""] * (len(out_df.columns)-1)], columns=out_df.columns)
+            out_df = pd.concat([note_df, out_df], ignore_index=True)
+
+            st.info(note_text)
             st.success("✅ Final Nomenclatures Generated")
             st.dataframe(out_df)
 
