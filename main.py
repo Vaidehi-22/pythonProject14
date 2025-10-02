@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import re
+import io
 from openpyxl import load_workbook
 from openpyxl.comments import Comment
 
@@ -198,13 +199,13 @@ if planon_file and sys_file:
                 tag_name = str(row["Name"])
                 tag_abbr = str(row["Abbreviation"])
 
-                # --- Clean Room code: keep only numbers ---
+                # --- Clean Room code: keep digits + dots only ---
                 room_clean = re.sub(r"[^0-9.]", "", str(room)) if room else room
 
                 # --- Clean Tag Abbreviation: remove numbers ---
                 tag_abbr_clean = re.sub(r"\d+", "", str(tag_abbr))
 
-                # --- Build Final Nomenclature (fixed format) ---
+                # --- Build Final Nomenclature ---
                 loc_trimmed = str(location_code).replace("LOC-", "", 1) if location_code else ""
 
                 loc_parts = loc_trimmed.split("-")
@@ -246,25 +247,29 @@ if planon_file and sys_file:
             st.success("✅ Final Nomenclatures Generated")
             st.dataframe(out_df)
 
-            # Save Excel
-            output_path = "Final_Nomenclature_Output.xlsx"
-            out_df.to_excel(output_path, index=False)
+            # Save Excel to memory buffer (not disk)
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                out_df.to_excel(writer, index=False)
 
             # Add Excel comment
-            wb = load_workbook(output_path)
+            output.seek(0)
+            wb = load_workbook(output)
             ws = wb.active
             note = "⚠️ If there is any numeric value in the TagAbbreviation then that numeric value need not be considered in final tagging."
             ws["I1"].comment = Comment(note, "System")
-            wb.save(output_path)
 
-            # Show warning in dashboard
-            st.warning(note)
+            # Save back into buffer
+            output = io.BytesIO()
+            wb.save(output)
+            output.seek(0)
 
-            # Download
+            # Download button (in-memory file only)
             st.download_button(
                 "📥 Download Excel",
-                data=open(output_path, "rb").read(),
-                file_name="Final_Nomenclature_Output.xlsx"
+                data=output,
+                file_name="Final_Nomenclature_Output.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
             st.error("❌ No nomenclatures generated. Please check selections and sheet contents.")
