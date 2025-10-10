@@ -5,9 +5,40 @@ import io
 from openpyxl import load_workbook
 from openpyxl.comments import Comment
 
+
 # ---------------- Helpers ----------------
 def _norm(s: str) -> str:
     return re.sub(r"\s+", " ", str(s).strip().lower()) if s is not None else ""
+
+
+def clean_room_code(building, floor, room):
+    """Smart room code extraction logic based on patterns."""
+    if not isinstance(room, str) or not room.strip():
+        return ""
+
+    room = room.strip()
+    building_suffix = str(building).split("-")[-1] if isinstance(building, str) else ""
+    floor_str = str(floor).strip()
+
+    # Case 1: Hyphen-separated pattern (like 01-06-6.29 or 01-02-05)
+    if "-" in room:
+        parts = [p.strip() for p in room.split("-") if p.strip()]
+        if len(parts) >= 3:
+            if (
+                parts[0].endswith(building_suffix)
+                or parts[1] == floor_str
+                or floor_str in parts
+            ):
+                return parts[-1]
+        return parts[-1] if parts else room
+
+    # Case 2: Dot-separated pattern (like 60.01.015G, KALA0.001.00.01, ABUS2.01)
+    if "." in room:
+        parts = [p.strip() for p in room.split(".") if p.strip()]
+        return parts[-1] if parts else room
+
+    # Case 3: No recognizable pattern
+    return room
 
 
 def extract_term_abbrev_table(tag_summary_raw: pd.DataFrame) -> pd.DataFrame:
@@ -62,7 +93,7 @@ def extract_name_abbrev_table(sheet_raw: pd.DataFrame) -> pd.DataFrame:
             cell = _norm(df.iat[r, c])
             if cell == "name" and name_pos is None:
                 name_pos = (r, c)
-            if "abbreviation" in cell and abbr_pos is None:  # relaxed condition
+            if "abbreviation" in cell and abbr_pos is None:
                 abbr_pos = (r, c)
 
     if not name_pos or not abbr_pos:
@@ -93,46 +124,46 @@ def extract_name_abbrev_table(sheet_raw: pd.DataFrame) -> pd.DataFrame:
 
 
 # ---------------- Streamlit App ----------------
-st.set_page_config(page_title="Multi-Equipment Nomenclature Generator", layout="wide")
-st.title("🏢 Multi-Equipment Final Nomenclature Generator")
+st.set_page_config(page_title="Multi-Asset Nomenclature Generator", layout="wide")
+st.title("🏢 Multi-Asset Nomenclature Generator")
 
 # Upload files
-planon_file = st.file_uploader("📂 Upload Planon Excel", type=["xlsx"])
-sys_file = st.file_uploader("📂 Upload System Workbook (Tag Summary + Equipment Sheets)", type=["xlsx"])
+planon_file = st.file_uploader("📂 Upload DataProduct Excel", type=["xlsx"])
+sys_file = st.file_uploader("📂 Upload Nomenclature sheet", type=["xlsx"])
 
 if planon_file and sys_file:
     # Load Planon
     df_planon = pd.read_excel(planon_file, dtype=str)
     df_planon.columns = df_planon.columns.str.strip()
 
-    required = ["Location code", "Building code", "Floor Code", "Room code"]
+    required = ["Location Code", "Building Code", "Floor", "Rooms"]
     if not all(col in df_planon.columns for col in required):
         st.error(f"Planon must contain: {', '.join(required)}")
         st.stop()
 
     # --- Dependent Dropdowns ---
-    loc_options = sorted(df_planon["Location code"].dropna().unique())
+    loc_options = sorted(df_planon["Location Code"].dropna().unique())
     location_code = st.selectbox("🌍 Select Location Code", loc_options)
 
     building_options = sorted(
-        df_planon.loc[df_planon["Location code"] == location_code, "Building code"].dropna().unique()
+        df_planon.loc[df_planon["Location Code"] == location_code, "Building Code"].dropna().unique()
     )
     building = st.selectbox("🏢 Select Building Code", building_options)
 
     floor_options = sorted(
         df_planon[
-            (df_planon["Location code"] == location_code) &
-            (df_planon["Building code"] == building)
-        ]["Floor Code"].dropna().unique()
+            (df_planon["Location Code"] == location_code) &
+            (df_planon["Building Code"] == building)
+        ]["Floor"].dropna().unique()
     )
-    floor = st.selectbox("🏬 Select Floor Code", floor_options)
+    floor = st.selectbox("🏗️ Select Floor Code", floor_options)
 
     room_options = sorted(
         df_planon[
-            (df_planon["Location code"] == location_code) &
-            (df_planon["Building code"] == building) &
-            (df_planon["Floor Code"] == floor)
-        ]["Room code"].dropna().unique()
+            (df_planon["Location Code"] == location_code) &
+            (df_planon["Building Code"] == building) &
+            (df_planon["Floor"] == floor)
+        ]["Rooms"].dropna().unique()
     )
     room = st.selectbox("🚪 Select Room Code", room_options)
 
@@ -199,10 +230,10 @@ if planon_file and sys_file:
                 tag_name = str(row["Name"])
                 tag_abbr = str(row["Abbreviation"])
 
-                # --- Clean Room code: keep digits + dots only ---
-                room_clean = re.sub(r"[^0-9.]", "", str(room)) if room else room
+                # --- NEW: Smart Room Logic ---
+                room_clean = clean_room_code(building, floor, room)
 
-                # --- Clean Tag Abbreviation: remove numbers ---
+                # --- Clean Tag Abbreviation ---
                 tag_abbr_clean = re.sub(r"\d+", "", str(tag_abbr))
 
                 # --- Build Final Nomenclature ---
@@ -210,8 +241,8 @@ if planon_file and sys_file:
 
                 loc_parts = loc_trimmed.split("-")
                 if len(loc_parts) >= 2:
-                    loc_prefix = loc_parts[0]          # AE
-                    loc_site = loc_parts[1]            # ABUS2
+                    loc_prefix = loc_parts[0]
+                    loc_site = loc_parts[1]
                     loc_formatted = f"{loc_prefix}_{loc_site}"
                 else:
                     loc_formatted = loc_trimmed
@@ -221,10 +252,13 @@ if planon_file and sys_file:
 
                 prefix = f"{loc_formatted}_{bldg_trimmed}"
                 equip_token = f"{equip_abbrev}{asset_number}"
+
+                # Use cleaned room code in final nomenclature
                 final = f"{prefix}_{floor}_{equip_token}_{room_clean}_{tag_abbr_clean}"
 
+                # Use original room (not cleaned) in output table
                 all_nomenclatures.append([
-                    location_code, building, floor, room_clean,
+                    location_code, building, floor, room,  # <--- ORIGINAL ROOM
                     equip_term, equip_abbrev, tag_name, tag_abbr_clean, final
                 ])
 
@@ -232,41 +266,41 @@ if planon_file and sys_file:
             out_df = pd.DataFrame(
                 all_nomenclatures,
                 columns=[
-                    "Location code", "Building code", "Floor code", "Room code",
+                    "Location Code", "Building code", "Floor code", "Room code",
                     "Equipment Term", "Equipment Abbreviation",
                     "Name", "Tag Abbreviation", "Final Nomenclature"
                 ]
             )
 
-            # Add explanatory note
-            note_text = "⚠️ Note: Room codes are trimmed to numeric parts only; sensor names ignore numeric values."
-            note_df = pd.DataFrame([[note_text] + [""] * (len(out_df.columns)-1)], columns=out_df.columns)
+            note_text = "⚠️ Note: Do not display number if the numbers are present in Tag Abbrevation, Numbers to be shown only for asset number."
+            note_df = pd.DataFrame([[note_text] + [""] * (len(out_df.columns) - 1)], columns=out_df.columns)
             out_df = pd.concat([note_df, out_df], ignore_index=True)
 
             st.info(note_text)
             st.success("✅ Final Nomenclatures Generated")
             st.dataframe(out_df)
 
-            # Save Excel to memory buffer (not disk)
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine="openpyxl") as writer:
                 out_df.to_excel(writer, index=False)
 
-            # Add Excel comment
             output.seek(0)
             wb = load_workbook(output)
             ws = wb.active
-            note = "⚠️ If there is any numeric value in the TagAbbreviation then that numeric value need not be considered in final tagging."
+            note = (
+                "⚠️ Room codes are processed using smart logic:\n"
+                "• Hyphen patterns → last part after matching building/floor\n"
+                "• Dot patterns → last part after final dot\n"
+                "• Others → room kept as-is"
+            )
             ws["I1"].comment = Comment(note, "System")
 
-            # Save back into buffer
             output = io.BytesIO()
             wb.save(output)
             output.seek(0)
 
-            # Download button (in-memory file only)
             st.download_button(
-                "📥 Download Excel",
+                "📥 Download Final Excel",
                 data=output,
                 file_name="Final_Nomenclature_Output.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
