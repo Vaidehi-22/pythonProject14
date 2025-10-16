@@ -5,7 +5,6 @@ import io
 from openpyxl import load_workbook
 from openpyxl.comments import Comment
 
-
 # ---------------- Helpers ----------------
 def _norm(s: str) -> str:
     return re.sub(r"\s+", " ", str(s).strip().lower()) if s is not None else ""
@@ -20,7 +19,7 @@ def clean_room_code(building, floor, room):
     building_suffix = str(building).split("-")[-1] if isinstance(building, str) else ""
     floor_str = str(floor).strip()
 
-    # Case 1: Hyphen-separated pattern (like 01-06-6.29 or 01-02-05)
+    # Case 1: Hyphen-separated pattern
     if "-" in room:
         parts = [p.strip() for p in room.split("-") if p.strip()]
         if len(parts) >= 3:
@@ -32,7 +31,7 @@ def clean_room_code(building, floor, room):
                 return parts[-1]
         return parts[-1] if parts else room
 
-    # Case 2: Dot-separated pattern (like 60.01.015G, KALA0.001.00.01, ABUS2.01)
+    # Case 2: Dot-separated pattern
     if "." in room:
         parts = [p.strip() for p in room.split(".") if p.strip()]
         return parts[-1] if parts else room
@@ -42,7 +41,7 @@ def clean_room_code(building, floor, room):
 
 
 def extract_term_abbrev_table(tag_summary_raw: pd.DataFrame) -> pd.DataFrame:
-    """Extract Term ↔ Abbreviation pairs from Tag Summary (embedded labels)."""
+    """Extract Term ↔ Abbreviation pairs from Tag Summary."""
     df = tag_summary_raw.copy().astype(str).applymap(lambda x: x.strip() if pd.notna(x) else "")
     rows, cols = df.shape
     term_pos = abbr_pos = None
@@ -52,7 +51,7 @@ def extract_term_abbrev_table(tag_summary_raw: pd.DataFrame) -> pd.DataFrame:
             cell = _norm(df.iat[r, c])
             if cell == "term" and term_pos is None:
                 term_pos = (r, c)
-            if cell == "abbreviation" and abbr_pos is None:
+            if "abbreviation" in cell and abbr_pos is None:
                 abbr_pos = (r, c)
 
     if not term_pos or not abbr_pos:
@@ -63,8 +62,8 @@ def extract_term_abbrev_table(tag_summary_raw: pd.DataFrame) -> pd.DataFrame:
 
     out_rows, blanks = [], 0
     for r in range(row_start, rows):
-        term_val = df.iat[r, term_col] if term_col is not None else ""
-        abbr_val = df.iat[r, abbr_col] if abbr_col is not None else ""
+        term_val = df.iat[r, term_col]
+        abbr_val = df.iat[r, abbr_col]
 
         if not term_val and not abbr_val:
             blanks += 1
@@ -73,7 +72,7 @@ def extract_term_abbrev_table(tag_summary_raw: pd.DataFrame) -> pd.DataFrame:
         if blanks >= 3:
             break
 
-        if _norm(term_val) == "term" or _norm(abbr_val) == "abbreviation":
+        if _norm(term_val) in ["term", ""] or "abbreviation" in _norm(abbr_val):
             continue
 
         if term_val or abbr_val:
@@ -83,7 +82,7 @@ def extract_term_abbrev_table(tag_summary_raw: pd.DataFrame) -> pd.DataFrame:
 
 
 def extract_name_abbrev_table(sheet_raw: pd.DataFrame) -> pd.DataFrame:
-    """Extract Name ↔ Abbreviation pairs from equipment sheets (embedded labels)."""
+    """Extract Name ↔ Abbreviation pairs from equipment sheets."""
     df = sheet_raw.copy().astype(str).applymap(lambda x: x.strip() if pd.notna(x) else "")
     rows, cols = df.shape
     name_pos = abbr_pos = None
@@ -91,9 +90,9 @@ def extract_name_abbrev_table(sheet_raw: pd.DataFrame) -> pd.DataFrame:
     for r in range(rows):
         for c in range(cols):
             cell = _norm(df.iat[r, c])
-            if cell == "name" and name_pos is None:
+            if ("name" in cell or "tag" in cell or "signal" in cell) and name_pos is None:
                 name_pos = (r, c)
-            if "abbreviation" in cell and abbr_pos is None:
+            if ("abbr" in cell or "abbreviation" in cell) and abbr_pos is None:
                 abbr_pos = (r, c)
 
     if not name_pos or not abbr_pos:
@@ -104,17 +103,17 @@ def extract_name_abbrev_table(sheet_raw: pd.DataFrame) -> pd.DataFrame:
 
     out_rows, blanks = [], 0
     for r in range(row_start, rows):
-        name_val = df.iat[r, name_col] if name_col is not None else ""
-        abbr_val = df.iat[r, abbr_col] if abbr_col is not None else ""
+        name_val = df.iat[r, name_col]
+        abbr_val = df.iat[r, abbr_col]
 
         if not name_val and not abbr_val:
             blanks += 1
         else:
             blanks = 0
-        if blanks >= 3:
+        if blanks >= 5:
             break
 
-        if _norm(name_val) == "name" or "abbreviation" in _norm(abbr_val):
+        if "name" in _norm(name_val) or "abbreviation" in _norm(abbr_val):
             continue
 
         if name_val or abbr_val:
@@ -127,12 +126,10 @@ def extract_name_abbrev_table(sheet_raw: pd.DataFrame) -> pd.DataFrame:
 st.set_page_config(page_title="Multi-Asset Nomenclature Generator", layout="wide")
 st.title("🏢 Multi-Asset Nomenclature Generator")
 
-# Upload files
 planon_file = st.file_uploader("📂 Upload DataProduct Excel", type=["xlsx"])
 sys_file = st.file_uploader("📂 Upload Nomenclature sheet", type=["xlsx"])
 
 if planon_file and sys_file:
-    # Load Planon
     df_planon = pd.read_excel(planon_file, dtype=str)
     df_planon.columns = df_planon.columns.str.strip()
 
@@ -141,13 +138,11 @@ if planon_file and sys_file:
         st.error(f"Planon must contain: {', '.join(required)}")
         st.stop()
 
-    # --- Dependent Dropdowns ---
+    # Dependent dropdowns
     loc_options = sorted(df_planon["Location Code"].dropna().unique())
     location_code = st.selectbox("🌍 Select Location Code", loc_options)
 
-    building_options = sorted(
-        df_planon.loc[df_planon["Location Code"] == location_code, "Building Code"].dropna().unique()
-    )
+    building_options = sorted(df_planon.loc[df_planon["Location Code"] == location_code, "Building Code"].dropna().unique())
     building = st.selectbox("🏢 Select Building Code", building_options)
 
     floor_options = sorted(
@@ -165,18 +160,17 @@ if planon_file and sys_file:
             (df_planon["Floor"] == floor)
         ]["Rooms"].dropna().unique()
     )
-    room = st.selectbox("🚪 Select Room Code", room_options)
+    rooms = st.multiselect("🚪 Select Room Codes", room_options)
+
+    if not rooms:
+        st.warning("⚠️ Please select at least one room.")
+        st.stop()
 
     # Load system workbook
     book = pd.ExcelFile(sys_file)
 
     # Detect Tag Summary
-    tag_summary_sheet = None
-    for s in book.sheet_names:
-        if re.search(r"tag\s*summary", s, re.I):
-            tag_summary_sheet = s
-            break
-
+    tag_summary_sheet = next((s for s in book.sheet_names if re.search(r"tag\s*summary", s, re.I)), None)
     if not tag_summary_sheet:
         st.error("❌ No Tag Summary sheet found")
         st.stop()
@@ -188,15 +182,12 @@ if planon_file and sys_file:
         st.error("❌ Could not extract Term-Abbreviation pairs from Tag Summary")
         st.stop()
 
-    # Multi-select equipments
     equip_terms = st.multiselect("⚙️ Select Equipments (from Tag Summary)", sorted(tag_df["Term"].dropna().unique()))
 
-    # Asset number per equipment
     asset_numbers = {}
     for equip in equip_terms:
         asset_numbers[equip] = st.text_input(f"🔢 Enter Asset Number for {equip}", value="")
 
-    # Generate nomenclatures
     if st.button("🚀 Generate Final Nomenclatures"):
         if not equip_terms:
             st.error("❌ Please select at least one equipment")
@@ -207,6 +198,7 @@ if planon_file and sys_file:
 
         all_nomenclatures = []
 
+        # 🔧 Correct loop structure: extract once per equipment, apply to all rooms
         for equip_term in equip_terms:
             try:
                 equip_abbrev = tag_df.loc[tag_df["Term"] == equip_term, "Abbreviation"].iloc[0]
@@ -226,19 +218,11 @@ if planon_file and sys_file:
                 st.warning(f"⚠️ Could not extract Name/Abbreviation from sheet '{equip_term}', skipping...")
                 continue
 
-            for _, row in equip_df.iterrows():
-                tag_name = str(row["Name"])
-                tag_abbr = str(row["Abbreviation"])
-
-                # --- NEW: Smart Room Logic ---
+            # Loop through all rooms and tags properly
+            for room in rooms:
                 room_clean = clean_room_code(building, floor, room)
 
-                # --- Clean Tag Abbreviation ---
-                tag_abbr_clean = re.sub(r"\d+", "", str(tag_abbr))
-
-                # --- Build Final Nomenclature ---
                 loc_trimmed = str(location_code).replace("LOC-", "", 1) if location_code else ""
-
                 loc_parts = loc_trimmed.split("-")
                 if len(loc_parts) >= 2:
                     loc_prefix = loc_parts[0]
@@ -249,18 +233,20 @@ if planon_file and sys_file:
 
                 bldg_parts = str(building).split("-", 1)
                 bldg_trimmed = bldg_parts[1] if len(bldg_parts) > 1 else building
-
                 prefix = f"{loc_formatted}_{bldg_trimmed}"
                 equip_token = f"{equip_abbrev}{asset_number}"
 
-                # Use cleaned room code in final nomenclature
-                final = f"{prefix}_{floor}_{equip_token}_{room_clean}_{tag_abbr_clean}"
+                for _, row in equip_df.iterrows():
+                    tag_name = str(row["Name"])
+                    tag_abbr = str(row["Abbreviation"])
+                    tag_abbr_clean = re.sub(r"\d+", "", str(tag_abbr))
 
-                # Use original room (not cleaned) in output table
-                all_nomenclatures.append([
-                    location_code, building, floor, room,  # <--- ORIGINAL ROOM
-                    equip_term, equip_abbrev, tag_name, tag_abbr_clean, final
-                ])
+                    final = f"{prefix}_{floor}_{equip_token}_{room_clean}_{tag_abbr_clean}"
+
+                    all_nomenclatures.append([
+                        location_code, building, floor, room,
+                        equip_term, equip_abbrev, tag_name, tag_abbr_clean, final
+                    ])
 
         if all_nomenclatures:
             out_df = pd.DataFrame(
@@ -272,7 +258,7 @@ if planon_file and sys_file:
                 ]
             )
 
-            note_text = "⚠️ Note: Do not display number if the numbers are present in Tag Abbrevation, Numbers to be shown only for asset number."
+            note_text = "⚠️ Note: Do not display number if the numbers are present in Tag Abbrevation. Numbers to be shown only for asset number."
             note_df = pd.DataFrame([[note_text] + [""] * (len(out_df.columns) - 1)], columns=out_df.columns)
             out_df = pd.concat([note_df, out_df], ignore_index=True)
 
