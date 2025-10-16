@@ -165,7 +165,11 @@ if planon_file and sys_file:
             (df_planon["Floor"] == floor)
         ]["Rooms"].dropna().unique()
     )
-    room = st.selectbox("🚪 Select Room Code", room_options)
+    rooms = st.multiselect("🚪 Select Room Codes", room_options)
+
+    if not rooms:
+        st.warning("⚠️ Please select at least one room before generating nomenclatures.")
+        st.stop()
 
     # Load system workbook
     book = pd.ExcelFile(sys_file)
@@ -225,16 +229,41 @@ if planon_file and sys_file:
             if equip_df.empty:
                 st.warning(f"⚠️ Could not extract Name/Abbreviation from sheet '{equip_term}', skipping...")
                 continue
-
-            for _, row in equip_df.iterrows():
-                tag_name = str(row["Name"])
-                tag_abbr = str(row["Abbreviation"])
-
-                # --- NEW: Smart Room Logic ---
+            for room in rooms:
                 room_clean = clean_room_code(building, floor, room)
 
-                # --- Clean Tag Abbreviation ---
-                tag_abbr_clean = re.sub(r"\d+", "", str(tag_abbr))
+                for _, row in equip_df.iterrows():
+                    tag_name = str(row["Name"])
+                    tag_abbr = str(row["Abbreviation"])
+
+                        # --- Clean Tag Abbreviation ---
+                    tag_abbr_clean = re.sub(r"\d+", "", str(tag_abbr))
+
+                        # --- Build Final Nomenclature ---
+                    loc_trimmed = str(location_code).replace("LOC-", "", 1) if location_code else ""
+
+                    loc_parts = loc_trimmed.split("-")
+                    if len(loc_parts) >= 2:
+                        loc_prefix = loc_parts[0]
+                        loc_site = loc_parts[1]
+                        loc_formatted = f"{loc_prefix}_{loc_site}"
+                    else:
+                        loc_formatted = loc_trimmed
+
+                        bldg_parts = str(building).split("-", 1)
+                        bldg_trimmed = bldg_parts[1] if len(bldg_parts) > 1 else building
+
+                        prefix = f"{loc_formatted}_{bldg_trimmed}"
+                        equip_token = f"{equip_abbrev}{asset_number}"
+
+                        # Use cleaned room code in final nomenclature
+                        final = f"{prefix}_{floor}_{equip_token}_{room_clean}_{tag_abbr_clean}"
+
+                        # Store original room code in output table
+                        all_nomenclatures.append([
+                            location_code, building, floor, room,
+                            equip_term, equip_abbrev, tag_name, tag_abbr_clean, final
+                        ])
 
                 # --- Build Final Nomenclature ---
                 loc_trimmed = str(location_code).replace("LOC-", "", 1) if location_code else ""
